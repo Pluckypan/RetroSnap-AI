@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Milu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Inter:wght@400;600&display=swap');
+      
+      /* Custom animation for the photo ejection from the camera */
+      @keyframes eject-up {
+        0% { 
+          transform: translateY(40px) scale(0.9); 
+          opacity: 0; 
+        }
+        20% { 
+          opacity: 1; 
+        }
+        100% { 
+          /* Move up significantly to clear the camera body */
+          transform: translateY(-220px) scale(1) rotate(-2deg); 
+        }
+      }
+
+      .animate-eject-up {
+        animation: eject-up 2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+      }
+
+      @keyframes flash-animation {
+        0% { opacity: 0; }
+        10% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      
+      .animate-flash {
+        animation: flash-animation 0.2s ease-out;
+      }
+      
+      @keyframes blink-text {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+      
+      .animate-blink-text {
+        animation: blink-text 1s infinite;
+      }
+
+      /* New animations */
+      @keyframes slide-in-right {
+        0% { opacity: 0; transform: translateX(15px); }
+        100% { opacity: 1; transform: translateX(0); }
+      }
+      
+      .animate-slide-in-right {
+        animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      
+      .animate-fade-in {
+        animation: fade-in 0.3s ease-out forwards;
+      }
+
+      @keyframes scale-in {
+        from { transform: scale(0.95); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+      }
+      
+      .animate-scale-in {
+        animation: scale-in 0.3s ease-out forwards;
+      }
+
+      /* Texture overlay for vintage feel */
+      .grain-overlay {
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.1'/%3E%3C/svg%3E");
+        pointer-events: none;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-stone-100 text-stone-900 antialiased overflow-hidden">
+    <div id="root"></div>
+  </body>
+</html>

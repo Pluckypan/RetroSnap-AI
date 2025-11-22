@@ -1,0 +1,7 @@
+{
+  "name": "RetroSnap AI",
+  "description": "A nostalgic Polaroid-style camera app that develops photos slowly and uses Gemini AI to generate handwritten memories.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
