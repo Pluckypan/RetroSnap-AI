@@ -11,6 +11,8 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1jJslmuSlZNUpQLDDQRDsgIqwzfcTnl0P
 
+Demo: https://x.com/olkpan/status/1992422755544060099
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
