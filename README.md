@@ -4,6 +4,9 @@
 
 # Run and deploy your AI Studio app
 
+<img width="1431" height="720" alt="h-camera-0001" src="https://github.com/user-attachments/assets/01e06b8d-d592-491e-bc3b-eca5e7e15f26" />
+
+
 This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1jJslmuSlZNUpQLDDQRDsgIqwzfcTnl0P
