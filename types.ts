@@ -1,3 +1,4 @@
+
 export interface Photo {
   id: string;
   dataUrl: string;
@@ -28,4 +29,16 @@ export enum FilterType {
   CINE_TEAL_ORANGE = 'Blockbuster',
   CINE_MOODY = 'Moody',
   CINE_VIVID = 'Vivid',
+}
+
+export type AiProvider = 'gemini' | 'openai';
+
+export interface AiConfig {
+  enabled: boolean;
+  provider: AiProvider;
+  openaiConfig?: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+  };
 }

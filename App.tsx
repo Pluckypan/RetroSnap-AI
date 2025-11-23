@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Camera, LayoutGrid, Trash2 } from 'lucide-react';
-import { Photo } from './types';
+import { Camera, LayoutGrid, Trash2, AlertCircle, X } from 'lucide-react';
+import { get, set, del } from 'idb-keyval';
+import { Photo, AiConfig } from './types';
 import { PolaroidFrame } from './components/PolaroidFrame';
 import { RetroCamera } from './components/RetroCamera';
 import { PhotoPreviewModal } from './components/PhotoPreviewModal';
@@ -9,18 +10,64 @@ import { generatePhotoCaption } from './services/geminiService';
 import { getDominantColor } from './utils/imageUtils';
 
 export default function App() {
+  // State initialized as empty, will load async
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [isStorageLoaded, setIsStorageLoaded] = useState(false);
+  
   const [dominantColor, setDominantColor] = useState<string>('#ef4444'); // Default red
   const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; initialX: number; initialY: number } | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null); // For displaying errors UI
   const maxZIndex = useRef(10);
   
   // Use ref to access photos in event listeners without re-binding
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
+  // Async Load from IndexedDB on mount
+  useEffect(() => {
+    const loadPhotos = async () => {
+      try {
+        const saved = await get('milu_photos');
+        if (saved && Array.isArray(saved)) {
+          // Ensure any loaded photos are NOT in "isDeveloping" state
+          const processed = saved.map((p: Photo) => ({ ...p, isDeveloping: false }));
+          setPhotos(processed);
+          
+          // Update maxZIndex based on loaded photos
+          if (processed.length > 0) {
+            const maxZ = Math.max(...processed.map((p: Photo) => p.zIndex || 0));
+            maxZIndex.current = maxZ + 1;
+            
+            // Set dominant color from the most recent photo (last in array)
+            const lastPhoto = processed[processed.length - 1];
+            if (lastPhoto && lastPhoto.dataUrl) {
+              getDominantColor(lastPhoto.dataUrl).then(color => setDominantColor(color));
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load photos from IndexedDB", e);
+      } finally {
+        setIsStorageLoaded(true);
+      }
+    };
+    loadPhotos();
+  }, []);
+
+  // Debounced Save to IndexedDB
+  useEffect(() => {
+    // Don't save if we haven't finished loading yet (prevents overwriting DB with empty array)
+    if (!isStorageLoaded) return;
+
+    const handler = setTimeout(() => {
+      set('milu_photos', photos).catch(err => console.error("Failed to save photos to IndexedDB", err));
+    }, 1000);
+    
+    return () => clearTimeout(handler);
+  }, [photos, isStorageLoaded]);
+
   // Sync selectedPhoto with the latest version in photos list
-  // This ensures that when 'isDeveloping' flips to false in the main list, the modal updates too.
   useEffect(() => {
     if (selectedPhoto) {
       const freshPhoto = photos.find(p => p.id === selectedPhoto.id);
@@ -32,11 +79,17 @@ export default function App() {
   }, [photos, selectedPhoto]);
 
   // Handle new photo taken from Camera component
-  const handlePhotoTaken = useCallback(async (newPhotoData: Photo, startPos?: {x: number, y: number}, enableAi: boolean = false) => {
+  const handlePhotoTaken = useCallback(async (newPhotoData: Photo, startPos?: {x: number, y: number}, aiConfig?: AiConfig) => {
     // Define the target "stack" position in top-left
     const stackX = 50 + (Math.random() * 20 - 10);
     const stackY = 100 + (Math.random() * 20 - 10);
     
+    const isAiEnabled = aiConfig && aiConfig.enabled;
+    const initialCaption = isAiEnabled ? "✨ Writing..." : "Beautiful Moment";
+
+    // Clear previous errors when taking a new photo
+    if (isAiEnabled) setLastError(null);
+
     const newPhoto: Photo = {
       ...newPhotoData,
       // Start at the camera ejection point if provided, otherwise random center
@@ -45,7 +98,7 @@ export default function App() {
       // Start at -2deg to match the end of the CSS `eject-up` animation
       rotation: startPos ? -2 : 0, 
       zIndex: ++maxZIndex.current,
-      caption: "Beautiful Moment" // Default caption
+      caption: initialCaption 
     };
 
     // Update dominant color
@@ -81,16 +134,35 @@ export default function App() {
     }, 6000); 
 
     // Trigger AI Caption Generation ONLY if enabled
-    if (enableAi) {
-      generatePhotoCaption(newPhoto.dataUrl).then(aiCaption => {
-        setPhotos(prev => prev.map(p => {
-          // Only update if the caption is still default (user hasn't manually edited it yet)
-          if (p.id === newPhoto.id && (p.caption === "Beautiful Moment" || !p.caption)) {
-            return { ...p, caption: aiCaption };
-          }
-          return p;
-        }));
-      }).catch(err => console.error("AI Generation failed", err));
+    if (isAiEnabled) {
+      console.log("[RetroSnap] Triggering AI generation...");
+      
+      generatePhotoCaption(newPhoto.dataUrl, aiConfig)
+        .then(aiCaption => {
+          setPhotos(prev => prev.map(p => {
+            // Only update if the caption is still the placeholder (user hasn't manually edited it yet)
+            if (p.id === newPhoto.id && (p.caption === "✨ Writing..." || !p.caption)) {
+              return { ...p, caption: aiCaption };
+            }
+            return p;
+          }));
+        })
+        .catch(err => {
+          console.error("AI Generation failed in App:", err);
+          
+          // Show error in UI
+          let msg = err.message || "Unknown Error";
+          if (msg.includes("Failed to fetch")) msg = "Network Error: Check URL/CORS";
+          setLastError(`Smart Caption Failed: ${msg}`);
+
+          // Revert to default on error so it doesn't get stuck on "Writing..."
+          setPhotos(prev => prev.map(p => {
+            if (p.id === newPhoto.id && p.caption === "✨ Writing...") {
+              return { ...p, caption: "Beautiful Moment" };
+            }
+            return p;
+          }));
+        });
     }
   }, []);
 
@@ -180,9 +252,14 @@ export default function App() {
     maxZIndex.current = photos.length + 1;
   };
 
-  const clearPhotos = () => {
+  const clearPhotos = async () => {
     if (photos.length === 0) return;
     setPhotos([]);
+    try {
+      await del('milu_photos');
+    } catch (e) {
+      console.error("Failed to clear IndexedDB", e);
+    }
   };
 
   const handleDeletePhoto = useCallback((id: string) => {
@@ -309,6 +386,27 @@ export default function App() {
 
       {/* Persistent Retro Camera Widget */}
       <RetroCamera onPhotoTaken={handlePhotoTaken} accentColor={dominantColor} />
+      
+      {/* Error Log - Bottom Left */}
+      {lastError && (
+        <div className="fixed bottom-4 left-4 max-w-xs w-full bg-red-900/95 backdrop-blur text-white p-3 rounded-lg shadow-2xl border border-red-700/50 animate-slide-in-right z-[10000] pointer-events-auto flex flex-col gap-1.5">
+          <div className="flex items-start justify-between">
+             <div className="flex items-center gap-2 text-red-200 text-xs font-bold uppercase tracking-wider">
+                <AlertCircle size={14} />
+                <span>System Error</span>
+             </div>
+             <button 
+                onClick={() => setLastError(null)}
+                className="text-red-300 hover:text-white transition-colors"
+             >
+                <X size={14} />
+             </button>
+          </div>
+          <div className="text-xs font-mono leading-relaxed break-words opacity-90 bg-black/20 p-2 rounded text-red-50">
+            {lastError}
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1,11 +1,11 @@
 
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
-import { Power, SlidersHorizontal, Sparkles, Printer, MessageSquareText } from 'lucide-react';
-import { Photo, FilterType } from '../types';
+import { Power, SlidersHorizontal, Sparkles, Printer, MessageSquareText, Settings2, Key, Globe, Cpu } from 'lucide-react';
+import { Photo, FilterType, AiProvider, AiConfig } from '../types';
 import { applyVintageFilter } from '../utils/imageUtils';
 
 interface RetroCameraProps {
-  onPhotoTaken: (photo: Photo, startPos?: {x: number, y: number}, enableAi?: boolean) => void;
+  onPhotoTaken: (photo: Photo, startPos?: {x: number, y: number}, aiConfig?: AiConfig) => void;
   accentColor?: string;
 }
 
@@ -26,30 +26,61 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
   const [showSettings, setShowSettings] = useState(false);
 
   // Dragging State
-  const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const isInitialized = useRef(false);
 
-  // Settings State (with persistence)
+  // --- PERSISTENT STATE ---
+
+  // 1. Camera Position
+  const [position, setPosition] = useState(() => {
+    const saved = localStorage.getItem('milu_camera_pos');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) { return null; }
+    }
+    return null;
+  });
+
+  // 2. Beauty Level
   const [beautyLevel, setBeautyLevel] = useState(() => {
     const saved = localStorage.getItem('milu_beauty_level');
     return saved ? parseInt(saved, 10) : 80; 
   });
   
+  // 3. Active Filter
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem('milu_filter');
     return (saved as FilterType) || FilterType.CINE_MOODY; 
   });
 
+  // 4. AI Toggle
   const [useAiCaption, setUseAiCaption] = useState(() => {
     const saved = localStorage.getItem('milu_ai_caption');
-    return saved === 'true'; // Defaults to false if not set
+    return saved === 'true'; // Defaults to false
   });
 
-  // Initialize Position (Bottom Right)
+  // 5. AI Config
+  const [aiProvider, setAiProvider] = useState<AiProvider>(() => {
+    return (localStorage.getItem('milu_ai_provider') as AiProvider) || 'gemini';
+  });
+
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState(() => {
+    return localStorage.getItem('milu_openai_base_url') || '';
+  });
+
+  const [openaiApiKey, setOpenaiApiKey] = useState(() => {
+    return localStorage.getItem('milu_openai_api_key') || '';
+  });
+
+  const [openaiModel, setOpenaiModel] = useState(() => {
+    return localStorage.getItem('milu_openai_model') || 'gpt-4o-mini';
+  });
+
+  // Initialize Position if not in localStorage
   useEffect(() => {
-    if (!isInitialized.current) {
+    if (!position && !isInitialized.current) {
       const initialWidth = 384; // Width of camera (w-96)
       const initialHeight = 250; 
       setPosition({
@@ -57,17 +88,30 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
         y: window.innerHeight - initialHeight - 40 
       });
       isInitialized.current = true;
+    } else if (position && !isInitialized.current) {
+      // Validate bounds if loaded from storage
+      setPosition(prev => {
+          if (!prev) return prev;
+          return {
+            x: Math.min(prev.x, window.innerWidth - 100),
+            y: Math.min(prev.y, window.innerHeight - 100)
+          };
+      });
+      isInitialized.current = true;
     }
     
     const handleResize = () => {
-      setPosition(prev => ({
-        x: Math.min(prev.x, window.innerWidth - 390),
-        y: Math.min(prev.y, window.innerHeight - 260)
-      }));
+      setPosition(prev => {
+        if (!prev) return { x: 0, y: 0 };
+        return {
+            x: Math.min(prev.x, window.innerWidth - 390),
+            y: Math.min(prev.y, window.innerHeight - 260)
+        };
+      });
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, []); // Empty dependency is fine here as we use functional updates
 
   // Click Outside to Close Settings
   useEffect(() => {
@@ -93,7 +137,8 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
 
   // Drag Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) return;
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input') || (e.target as HTMLElement).closest('select')) return;
+    if (!position) return;
     setIsDragging(true);
     dragOffset.current = {
       x: e.clientX - position.x,
@@ -103,7 +148,7 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
+      if (!isDragging || !position) return;
       
       let newX = e.clientX - dragOffset.current.x;
       let newY = e.clientY - dragOffset.current.y;
@@ -129,14 +174,23 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, position]);
 
-  // Save settings
+  // --- SAVE SETTINGS TO LOCALSTORAGE ---
   useEffect(() => {
     localStorage.setItem('milu_beauty_level', beautyLevel.toString());
     localStorage.setItem('milu_filter', activeFilter);
     localStorage.setItem('milu_ai_caption', useAiCaption.toString());
-  }, [beautyLevel, activeFilter, useAiCaption]);
+    localStorage.setItem('milu_ai_provider', aiProvider);
+    localStorage.setItem('milu_openai_base_url', openaiBaseUrl);
+    localStorage.setItem('milu_openai_api_key', openaiApiKey);
+    localStorage.setItem('milu_openai_model', openaiModel);
+    
+    // Save position
+    if (position) {
+      localStorage.setItem('milu_camera_pos', JSON.stringify(position));
+    }
+  }, [beautyLevel, activeFilter, useAiCaption, aiProvider, openaiBaseUrl, openaiApiKey, openaiModel, position]);
 
   // Real-time Preview Loop
   const renderPreview = useCallback(() => {
@@ -176,19 +230,16 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
            ctx.restore();
         }
 
-        // 3. Filters (Updated to match imageUtils stronger presets)
+        // 3. Filters
         ctx.save();
         switch (activeFilter) {
             case FilterType.RETRO_CLASSIC:
-                // Warm, saturated, high contrast
                 ctx.filter = 'sepia(0.4) saturate(1.4) contrast(1.1) brightness(1.05)';
                 break;
             case FilterType.RETRO_NOIR:
-                // High Contrast B&W
                 ctx.filter = 'grayscale(1) contrast(1.8) brightness(0.9)';
                 break;
             case FilterType.RETRO_INSTANT:
-                // Washed out blacks, low saturation
                 ctx.filter = 'contrast(1.1) brightness(1.1) saturate(0.85) sepia(0.2)';
                 break;
             case FilterType.CINE_TEAL_ORANGE:
@@ -205,7 +256,6 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
         }
         
         if (activeFilter !== FilterType.ORIGINAL) {
-           // Apply Color Grading Layers
            ctx.globalCompositeOperation = 'overlay';
            if (activeFilter === FilterType.RETRO_CLASSIC) {
                ctx.fillStyle = 'rgba(255, 190, 100, 0.3)';
@@ -221,7 +271,7 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
                ctx.fillRect(0, 0, canvas.width, canvas.height);
            } else if (activeFilter === FilterType.RETRO_INSTANT) {
                ctx.globalCompositeOperation = 'screen';
-               ctx.fillStyle = 'rgba(30, 40, 100, 0.25)'; // Blue tint for shadows
+               ctx.fillStyle = 'rgba(30, 40, 100, 0.25)';
                ctx.fillRect(0, 0, canvas.width, canvas.height);
            }
         }
@@ -319,10 +369,8 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
        oscClick.stop(t + 0.03);
 
     } else if (type === 'motor') {
-       // Simulated Canon CP1300 Dye Sublimation Printer Sound
        const duration = 2.0; 
        
-       // 1. The mechanical motor hum (Triangle wave for smoothness)
        const motorOsc = ctx.createOscillator();
        const motorGain = ctx.createGain();
        motorOsc.connect(motorGain);
@@ -340,7 +388,6 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
        motorOsc.start(t);
        motorOsc.stop(t + duration);
 
-       // 2. Slight high-frequency gear whine
        const gearOsc = ctx.createOscillator();
        const gearGain = ctx.createGain();
        gearOsc.connect(gearGain);
@@ -359,7 +406,7 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
   };
 
   const takePhoto = async () => {
-    if (!videoRef.current || !captureCanvasRef.current || isShooting || !isCameraOn) return;
+    if (!videoRef.current || !captureCanvasRef.current || isShooting || !isCameraOn || !position) return;
     if (videoRef.current.readyState < 2) return;
 
     playSound('shutter');
@@ -394,7 +441,7 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
       const newPhoto: Photo = {
         id: Date.now().toString(),
         dataUrl: filteredDataUrl,
-        caption: "", // Initial empty caption
+        caption: "", 
         timestamp: Date.now(),
         isDeveloping: true,
         x: 0,
@@ -403,24 +450,24 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
         zIndex: 0
       };
 
-      // Wait for the CSS animation (2s) to fully complete
       setTimeout(() => {
-        // Coordinate Calculation for Seamless Transition:
-        // Camera Body Width: 384px (w-96)
-        // Photo Width: 170px
-        // Offset Left: (384 - 170) / 2 = 107px
-        //
-        // Dummy Element CSS Top: -4px
-        // Animation TranslateY: -220px
-        // Total Vertical Offset: -224px
-        
         const startX = position.x + 107; 
         const startY = position.y - 224; 
 
-        onPhotoTaken(newPhoto, { x: startX, y: startY }, useAiCaption);
+        const aiConfig: AiConfig = {
+          enabled: useAiCaption,
+          provider: aiProvider,
+          openaiConfig: {
+            baseUrl: openaiBaseUrl,
+            apiKey: openaiApiKey,
+            model: openaiModel
+          }
+        };
+
+        onPhotoTaken(newPhoto, { x: startX, y: startY }, aiConfig);
         setIsShooting(false);
         setTempPhoto(null);
-      }, 2050); // Slightly longer than 2s animation to ensure it settles at the end frame
+      }, 2050);
     }
   };
 
@@ -428,6 +475,8 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
     setIsCameraOn(prev => !prev);
     if (isCameraOn) setShowSettings(false);
   };
+
+  if (!position) return null; // Don't render until position is initialized
 
   return (
     <div 
@@ -441,12 +490,19 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
     >
       
       {/* Settings Panel (Positioned to the LEFT of the camera) */}
-      {showSettings && isCameraOn && (
+      {showSettings && (
         <div 
           ref={settingsRef}
-          className="absolute right-full top-auto bottom-4 mr-6 w-72 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-stone-200 animate-slide-in-right flex flex-col gap-4 z-[70] cursor-default origin-bottom-right"
+          className="absolute right-full top-auto bottom-4 mr-6 w-80 bg-white/95 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-stone-200 animate-slide-in-right flex flex-col gap-3 z-[70] cursor-default origin-bottom-right max-h-[80vh] overflow-y-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {/* Header */}
+          <div className="flex items-center gap-2 text-stone-800 pb-1 border-b border-stone-100 mb-1">
+            <Settings2 size={16} />
+            <span className="font-bold text-sm uppercase tracking-wider">Camera Settings</span>
+          </div>
+
+          {/* Beauty Level */}
           <div className="space-y-1">
              <div className="flex justify-between text-xs text-stone-500 uppercase font-bold tracking-wide">
                 <span className="flex items-center gap-1"><Sparkles size={12} className="text-pink-500"/> Beauty Level</span>
@@ -462,8 +518,9 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
              />
           </div>
 
+          {/* Filters */}
           <div className="space-y-1">
-            <div className="text-xs text-stone-500 uppercase font-bold tracking-wide mb-2">Filters</div>
+            <div className="text-xs text-stone-500 uppercase font-bold tracking-wide mb-1">Filters</div>
             <div className="grid grid-cols-3 gap-2">
                {Object.values(FilterType).map((filter) => (
                  <button
@@ -480,24 +537,91 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
             </div>
           </div>
 
-          {/* AI Caption Toggle */}
-          <div className="flex items-center justify-between pt-2 border-t border-stone-100">
-             <div className="flex items-center gap-2 text-xs text-stone-500 font-bold uppercase tracking-wide">
-               <MessageSquareText size={14} className={useAiCaption ? "text-blue-500" : "text-stone-400"} />
-               Smart Caption
+          {/* AI Caption Section */}
+          <div className="space-y-3 pt-2 border-t border-stone-100">
+             {/* Main Toggle */}
+             <div className="flex items-center justify-between">
+               <div className="flex items-center gap-2 text-xs text-stone-500 font-bold uppercase tracking-wide">
+                 <MessageSquareText size={14} className={useAiCaption ? "text-blue-500" : "text-stone-400"} />
+                 Smart Caption
+               </div>
+               <button
+                 onClick={() => setUseAiCaption(!useAiCaption)}
+                 className={`relative w-9 h-5 rounded-full transition-colors duration-200 ease-in-out ${useAiCaption ? 'bg-blue-500' : 'bg-stone-300'}`}
+               >
+                 <span 
+                   className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full shadow-sm transition-transform duration-200 ease-in-out ${useAiCaption ? 'translate-x-4' : 'translate-x-0'}`}
+                 />
+               </button>
              </div>
-             <button
-               onClick={() => setUseAiCaption(!useAiCaption)}
-               className={`relative w-10 h-5 rounded-full transition-colors duration-200 ease-in-out ${useAiCaption ? 'bg-blue-500' : 'bg-stone-300'}`}
-             >
-               <span 
-                 className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full shadow-sm transition-transform duration-200 ease-in-out ${useAiCaption ? 'translate-x-5' : 'translate-x-0'}`}
-               />
-             </button>
+
+             {/* Extended AI Options */}
+             {useAiCaption && (
+               <div className="bg-stone-50 p-3 rounded-lg border border-stone-100 space-y-3 text-xs">
+                  
+                  {/* Provider Toggle */}
+                  <div className="flex rounded-md overflow-hidden border border-stone-200">
+                    <button 
+                      onClick={() => setAiProvider('gemini')}
+                      className={`flex-1 py-1.5 text-center font-medium transition-colors ${aiProvider === 'gemini' ? 'bg-white text-blue-600 shadow-sm' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}
+                    >
+                      Gemini
+                    </button>
+                    <button 
+                      onClick={() => setAiProvider('openai')}
+                      className={`flex-1 py-1.5 text-center font-medium transition-colors ${aiProvider === 'openai' ? 'bg-white text-green-600 shadow-sm' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}
+                    >
+                      OpenAI
+                    </button>
+                  </div>
+
+                  {/* OpenAI Fields */}
+                  {aiProvider === 'openai' && (
+                    <div className="space-y-2 animate-fade-in">
+                      <div className="space-y-0.5">
+                        <label className="flex items-center gap-1 text-stone-500 uppercase text-[10px] font-bold"><Globe size={10}/> Base URL</label>
+                        <input 
+                          type="text" 
+                          value={openaiBaseUrl}
+                          onChange={(e) => setOpenaiBaseUrl(e.target.value)}
+                          placeholder="https://api.openai.com/v1"
+                          className="w-full p-1.5 rounded border border-stone-300 bg-white text-stone-800 text-xs focus:outline-none focus:border-green-500 placeholder:text-stone-300"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <label className="flex items-center gap-1 text-stone-500 uppercase text-[10px] font-bold"><Key size={10}/> API Key</label>
+                        <input 
+                          type="password" 
+                          value={openaiApiKey}
+                          onChange={(e) => setOpenaiApiKey(e.target.value)}
+                          placeholder="sk-..."
+                          className="w-full p-1.5 rounded border border-stone-300 bg-white text-stone-800 text-xs focus:outline-none focus:border-green-500 placeholder:text-stone-300"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <label className="flex items-center gap-1 text-stone-500 uppercase text-[10px] font-bold"><Cpu size={10}/> Model</label>
+                        <input 
+                          type="text" 
+                          value={openaiModel}
+                          onChange={(e) => setOpenaiModel(e.target.value)}
+                          placeholder="gpt-4o-mini"
+                          className="w-full p-1.5 rounded border border-stone-300 bg-white text-stone-800 text-xs focus:outline-none focus:border-green-500 placeholder:text-stone-300"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {aiProvider === 'gemini' && (
+                    <div className="text-stone-400 italic text-[10px] text-center">
+                      Using built-in Gemini Nano/Flash
+                    </div>
+                  )}
+               </div>
+             )}
           </div>
 
-          {/* Arrow pointing right to the camera settings button */}
-          <div className="absolute bottom-8 -right-1.5 w-3 h-3 bg-white/90 rotate-45 border-t border-stone-200"></div>
+          {/* Arrow */}
+          <div className="absolute bottom-8 -right-1.5 w-3 h-3 bg-white/95 rotate-45 border-t border-stone-200"></div>
         </div>
       )}
 
@@ -507,10 +631,8 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
           className="absolute z-0 animate-eject-up pointer-events-none flex justify-center"
           style={{
             width: '170px',
-            // Explicitly position exactly where the math expects it to be relative to parent
-            // Parent is w-96 (384px). Photo is 170px. Center is (384-170)/2 = 107px.
             left: '107px',
-            top: '-4px', // Equivalent to -top-1
+            top: '-4px',
           }}
         >
           <div 
@@ -530,18 +652,18 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
         </div>
       )}
 
-      {/* Camera Body - Landscape Orientation */}
+      {/* Camera Body */}
       <div className="relative bg-[#f4f1ed] rounded-[2rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5),inset_0_-4px_6px_rgba(0,0,0,0.1)] border border-stone-200/50 w-96 h-60 z-10 box-border overflow-hidden">
         
-        {/* Texture on body */}
+        {/* Texture */}
         <div className="absolute inset-0 opacity-50 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/leather.png')] bg-repeat bg-[length:100px_100px] mix-blend-multiply" />
 
-        {/* TOP LEFT: Hasselblad H Logo */}
+        {/* Hasselblad H Logo */}
         <div className="absolute top-7 left-7 z-20 pointer-events-none select-none">
             <span className="font-serif text-3xl italic font-bold text-stone-400/80">H</span>
         </div>
 
-        {/* TOP RIGHT: Shutter Button (Lighter Red) */}
+        {/* Shutter Button */}
         <div className="absolute top-5 right-6 z-20">
             <button 
               onClick={takePhoto}
@@ -555,27 +677,23 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
             />
         </div>
 
-        {/* CENTER: Lens Assembly */}
+        {/* Lens Assembly */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-stone-900 rounded-full border-[6px] border-[#dcd9d5] shadow-[0_10px_20px_rgba(0,0,0,0.2),inset_0_0_20px_rgba(0,0,0,0.8)] overflow-hidden ring-1 ring-white/40 group z-20">
            
-           {/* Flash Element */}
            <div className={`absolute inset-0 bg-white z-30 pointer-events-none ${isShooting ? 'animate-flash' : 'opacity-0'}`} />
 
-           {/* 1. Camera OFF State */}
            {!isCameraOn && (
              <div className="w-full h-full flex items-center justify-center bg-stone-900">
                <div className="w-2 h-2 bg-red-900 rounded-full animate-pulse shadow-[0_0_8px_red]" />
              </div>
            )}
 
-           {/* 2. Error State */}
            {isCameraOn && error && (
              <div className="w-full h-full flex items-center justify-center text-stone-500 text-xs text-center px-4">
                {error}
              </div>
            )}
 
-           {/* 3. Preview Stream */}
            {isCameraOn && !error && (
              <>
                <video ref={videoRef} autoPlay playsInline muted className="hidden" />
@@ -587,7 +705,6 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
              </>
            )}
 
-           {/* 4. Printing Overlay */}
            {isShooting && (
              <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center text-red-500 font-mono">
                 <Printer className="animate-bounce mb-2" size={24} />
@@ -595,18 +712,16 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
              </div>
            )}
            
-           {/* Glass Reflections */}
            <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black/20 pointer-events-none z-20 rounded-full" />
            <div className="absolute top-1/4 left-1/4 w-8 h-4 bg-white/10 blur-md rounded-[100%] rotate-[-45deg] z-20 pointer-events-none" />
         </div>
 
-        {/* BOTTOM LEFT: Settings Button */}
+        {/* Settings Button - Always enabled now */}
         <div className="absolute bottom-5 left-6 z-20">
             <button 
                ref={settingsBtnRef}
-               onClick={() => isCameraOn && setShowSettings(!showSettings)}
+               onClick={() => setShowSettings(!showSettings)}
                onMouseDown={(e) => e.stopPropagation()}
-               disabled={!isCameraOn}
                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-95
                 ${showSettings 
                    ? 'bg-stone-800 text-white shadow-inner' 
@@ -616,7 +731,7 @@ export const RetroCamera = memo<RetroCameraProps>(({ onPhotoTaken }) => {
             </button>
         </div>
 
-        {/* BOTTOM RIGHT: Power Button */}
+        {/* Power Button */}
         <div className="absolute bottom-5 right-6 z-20">
             <button 
               onClick={togglePower}
